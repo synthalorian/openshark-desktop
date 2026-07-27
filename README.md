@@ -10,14 +10,28 @@ Standalone GUI for [OpenShark](../openshark) — Svelte 5 + Tauri v2 + Rust, wra
 
 Wraps the `openshark` CLI in a native desktop window:
 
-- **Dashboard** — binary status, version, session stats
-- **Chat** — streaming conversation with the shark
-- **Agent** — autonomous task runner with live output
+- **Dashboard** — binary status, API server control, session stats
+- **Chat** — streaming conversation with the shark (token-level via WebSocket)
+- **Agent** — autonomous task runner with structured thinking/tool events
 - **Memory** — search the persistent memory vault (semantic / recent / keyword)
 - **Models** — browse configured providers
 - **Tools** — the full arsenal
 - **Doctor** — diagnostics with one-click fix
 - **Config** — edit `config.toml` in place
+
+## Server Mode
+
+On launch the app boots `openshark serve` on `127.0.0.1:1984` (adopting an
+already-running instance if found). With the server up:
+
+- **Chat** streams real token deltas over `/ws/v1/chat` (with `<think>`-tag
+  filtering and a per-message model override)
+- **Agent** renders structured `thinking` / `tool_call` / `tool_result` /
+  `complete` events from `/ws/v1/agent` instead of raw text
+
+Without it, both views fall back to spawning the CLI directly. The sidebar
+shows an `⚡ api :1984` badge when server mode is live. Servers spawned by the
+app are killed on exit; adopted ones are left alone.
 
 ## Requirements
 
@@ -60,6 +74,22 @@ npm run tauri dev
 ```bash
 npm run tauri build
 ```
+
+AppImage bundling may fail on some systems (linuxdeploy) — the binary, .deb,
+and .rpm are still produced under `src-tauri/target/release/bundle/`.
+
+## Install (Linux launcher)
+
+```bash
+scripts/install-desktop.sh
+```
+
+Installs the app launcher + hicolor icons, pointing at the release binary.
+
+## Release
+
+Push a `v*` tag — GitHub Actions builds Linux/macOS/Windows bundles and
+attaches them to a GitHub Release (see `.github/workflows/release.yml`).
 
 ---
 

@@ -1,12 +1,43 @@
 <script>
   import { onMount } from 'svelte';
-  import { runCommand } from '../lib/api.js';
+  import { runCommand, serverStart, serverStop, serverStatus } from '../lib/api.js';
 
   let { binary } = $props();
   let stats = $state('');
   let loading = $state(true);
+  let server = $state(null);
+  let serverBusy = $state(false);
+
+  async function refreshServer() {
+    try {
+      server = await serverStatus();
+    } catch {
+      server = null;
+    }
+  }
+
+  async function startServer() {
+    serverBusy = true;
+    try {
+      server = await serverStart();
+    } catch (e) {
+      server = { running: false, error: String(e) };
+    } finally {
+      serverBusy = false;
+    }
+  }
+
+  async function stopServer() {
+    serverBusy = true;
+    try {
+      server = await serverStop();
+    } finally {
+      serverBusy = false;
+    }
+  }
 
   onMount(async () => {
+    refreshServer();
     try {
       stats = await runCommand(['stats']);
     } catch (e) {
@@ -36,6 +67,26 @@
       {/if}
     </div>
 
+    <div class="card">
+      <h3>API Server</h3>
+      {#if server?.running}
+        <p><span class="badge ok">online :{server.port}</span></p>
+        <p class="kv"><span>version</span><code>{server.version ?? 'unknown'}</code></p>
+        <p class="kv"><span>mode</span><code>{server.owned ? 'managed' : 'adopted'}</code></p>
+        <p class="hint">Chat + Agent use live WebSocket streaming.</p>
+        {#if server.owned}
+          <button onclick={stopServer} disabled={serverBusy}>Stop</button>
+        {/if}
+      {:else}
+        <p><span class="badge info">offline</span></p>
+        <p class="hint">Start the server for token streaming and structured agent events.</p>
+        <button class="primary" onclick={startServer} disabled={serverBusy}>
+          {serverBusy ? 'Starting…' : 'Start Server'}
+        </button>
+        {#if server?.error}<p class="hint err-text">{server.error}</p>{/if}
+      {/if}
+    </div>
+
     <div class="card wide">
       <h3>Session Stats</h3>
       {#if loading}
@@ -62,6 +113,8 @@
   .kv span { color: var(--text-dim); }
   .kv code { color: var(--neon-yellow); overflow: hidden; text-overflow: ellipsis; }
   .hint { color: var(--text-dim); font-size: 12px; margin-top: 8px; }
+  .err-text { color: var(--error); }
+  .card button { margin-top: 10px; font-size: 12px; padding: 6px 14px; }
   .output { font-size: 12px; color: var(--text); max-height: 400px; overflow-y: auto; }
   .wide { min-height: 200px; }
   @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }

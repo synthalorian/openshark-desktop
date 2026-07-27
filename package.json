@@ -1,7 +1,7 @@
 {
   "name": "openshark-desktop",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Standalone desktop GUI for OpenShark — the harness that learns",
   "type": "module",
   "scripts": {

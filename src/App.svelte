@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { getBinaryInfo } from './lib/api.js';
+  import { getBinaryInfo, serverStart, serverStatus } from './lib/api.js';
   import { THEMES, applyTheme, currentThemeId } from './lib/themes.js';
   import Dashboard from './views/Dashboard.svelte';
   import Chat from './views/Chat.svelte';
@@ -27,6 +27,7 @@
   let binaryError = $state(null);
   let themeId = $state(currentThemeId());
   let showThemes = $state(false);
+  let server = $state(null);
 
   function pickTheme(id) {
     applyTheme(id);
@@ -39,6 +40,16 @@
       binary = await getBinaryInfo();
     } catch (e) {
       binaryError = String(e);
+    }
+    // Boot the API server in the background — views fall back to CLI without it.
+    try {
+      server = await serverStart();
+    } catch {
+      try {
+        server = await serverStatus();
+      } catch {
+        server = null;
+      }
     }
   });
 </script>
@@ -82,6 +93,12 @@
       <button class="theme-toggle" onclick={() => (showThemes = !showThemes)}>
         🎨 {THEMES.find((t) => t.id === themeId)?.name ?? 'Themes'}
       </button>
+
+      {#if server?.running}
+        <span class="badge ok server-badge" title="openshark serve — WebSocket streaming active">
+          ⚡ api :{server.port}
+        </span>
+      {/if}
 
       {#if showThemes}
         <div class="theme-picker">
@@ -264,6 +281,10 @@
   .theme-icon {
     width: 18px;
     text-align: center;
+  }
+
+  .server-badge {
+    font-size: 10px;
   }
 
   main {

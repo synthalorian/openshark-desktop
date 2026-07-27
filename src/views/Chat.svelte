@@ -1,10 +1,29 @@
 <script>
-  import { runStream } from '../lib/api.js';
+  import { onMount } from 'svelte';
+  import { runStream, serverStatus } from '../lib/api.js';
+  import { sharkWs, makeThinkFilter } from '../lib/sharkws.js';
 
   let input = $state('');
   let messages = $state([]);
   let running = $state(false);
   let outputEl;
+  let server = $state(null);
+  let model = $state('');
+  let activeWs = null;
+
+  onMount(async () => {
+    try {
+      const s = await serverStatus();
+      server = s.running ? s : null;
+    } catch {
+      server = null;
+    }
+  });
+
+  function appendToLast(text) {
+    messages[messages.length - 1].text += text;
+    scrollDown();
+  }
 
   async function send() {
     const msg = input.trim();
@@ -14,24 +33,79 @@
 
     messages = [...messages, { role: 'user', text: msg }];
     messages = [...messages, { role: 'assistant', text: '' }];
-    const idx = messages.length - 1;
+    scrollDown();
 
-    try {
-      await runStream(['chat', msg], (ev) => {
-        if (ev.event === 'stdout') {
-          messages[idx].text += ev.data;
-        } else if (ev.event === 'stderr') {
-          // openshark writes progress to stderr; append subtly
-          messages[idx].text += ev.data;
-        } else if (ev.event === 'done' && ev.data !== '0') {
-          messages[idx].text += `\n[exited with code ${ev.data}]`;
+    // Re-check in case the server came up after this view mounted
+    if (!server) {
+      try {
+        const s = await serverStatus();
+        if (s.running) server = s;
+      } catch { /* stay in cli mode */ }
+    }
+
+    if (server) {
+      await sendViaServer(msg);
+    } else {
+      await sendViaCli(msg);
+    }
+    running = false;
+  }
+
+  /** Streaming via openshark serve WebSocket — real token deltas. */
+  function sendViaServer(msg) {
+    return new Promise((resolve) => {
+      const filter = makeThinkFilter();
+      let settled = false;
+      const done = () => {
+        if (!settled) {
+          settled = true;
+          resolve();
         }
-        scrollDown();
+      };
+
+      activeWs = sharkWs(server.port, '/ws/v1/chat', {
+        onOpen: (ws) => {
+          const payload = { type: 'chat', message: msg };
+          if (model.trim()) payload.model = model.trim();
+          ws.send(JSON.stringify(payload));
+        },
+        onMessage: (m, ws) => {
+          if (m.type === 'token') {
+            appendToLast(filter(m.content));
+          } else if (m.type === 'complete') {
+            ws.close();
+            done();
+          } else if (m.type === 'error') {
+            appendToLast(`\n[error] ${m.message}`);
+            ws.close();
+            done();
+          }
+          // thinking/pong: no-op
+        },
+        onClose: done,
+        onError: () => {
+          appendToLast('\n[connection error — is openshark serve running?]');
+          done();
+        },
+      });
+    });
+  }
+
+  /** Fallback: spawn the CLI and stream stdout lines. */
+  async function sendViaCli(msg) {
+    const args = ['chat'];
+    if (model.trim()) args.push('-m', model.trim());
+    args.push(msg);
+    try {
+      await runStream(args, (ev) => {
+        if (ev.event === 'stdout') {
+          appendToLast(ev.data);
+        } else if (ev.event === 'done' && ev.data !== '0') {
+          appendToLast(`\n[exited with code ${ev.data}]`);
+        }
       });
     } catch (e) {
-      messages[idx].text = `Error: ${e}`;
-    } finally {
-      running = false;
+      appendToLast(`Error: ${e}`);
     }
   }
 
@@ -52,6 +126,17 @@
 <div class="view">
   <header>
     <h1 class="glow-text">▸ Chat</h1>
+    <div class="chat-bar">
+      <span class="badge {server ? 'ok' : 'info'}">
+        {server ? `server :${server.port}` : 'cli mode'}
+      </span>
+      <input
+        class="model-input"
+        bind:value={model}
+        placeholder="model (blank = server default)"
+        title="Model override, e.g. synthclaw-fast"
+      />
+    </div>
   </header>
 
   <div class="transcript" bind:this={outputEl}>
@@ -81,7 +166,10 @@
 
 <style>
   .view { display: flex; flex-direction: column; height: 100%; max-width: 900px; }
-  header h1 { color: var(--neon-cyan); font-size: 24px; margin-bottom: 12px; }
+  header h1 { color: var(--neon-cyan); font-size: 24px; margin-bottom: 8px; }
+
+  .chat-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .model-input { width: 260px; font-size: 11px; padding: 6px 10px; }
 
   .transcript {
     flex: 1;

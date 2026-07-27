@@ -53,3 +53,18 @@ export async function readConfig() {
 export async function writeConfig(content) {
   return invoke('write_config', { content });
 }
+
+/** Start (or adopt) an openshark serve API server → { running, owned, port, version } */
+export async function serverStart(port) {
+  return invoke('server_start', port ? { port } : {});
+}
+
+/** Stop the server if we own it */
+export async function serverStop() {
+  return invoke('server_stop');
+}
+
+/** Server status without side effects → { running, owned, port, version } */
+export async function serverStatus(port) {
+  return invoke('server_status', port ? { port } : {});
+}

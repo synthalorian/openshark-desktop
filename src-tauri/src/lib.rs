@@ -5,12 +5,17 @@
 //! `openshark` CLI binary: capture one-shot output for list/status commands
 //! and stream stdout line-by-line for chat/agent runs.
 
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpStream;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::ipc::Channel;
+
+const DEFAULT_SERVER_PORT: u16 = 1984;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -46,6 +51,22 @@ pub struct ConfigInfo {
     path: String,
     content: String,
 }
+
+#[derive(Serialize, Clone)]
+pub struct ServerStatus {
+    running: bool,
+    owned: bool,
+    port: u16,
+    version: Option<String>,
+}
+
+struct ServerState {
+    /// None = we adopted an already-running server (never killed by us)
+    child: Option<Child>,
+    port: u16,
+}
+
+static SERVER: Mutex<Option<ServerState>> = Mutex::new(None);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -197,19 +218,180 @@ fn write_config(content: String) -> Result<ConfigInfo, String> {
 }
 
 // ---------------------------------------------------------------------------
+// openshark serve lifecycle
+// ---------------------------------------------------------------------------
+
+/// Dependency-free health probe: GET /api/v1/health, extract version.
+fn health_check(port: u16) -> Option<String> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
+    stream
+        .set_read_timeout(Some(Duration::from_millis(1000)))
+        .ok()?;
+    stream
+        .set_write_timeout(Some(Duration::from_millis(1000)))
+        .ok()?;
+    stream
+        .write_all(
+            b"GET /api/v1/health HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        )
+        .ok()?;
+    let mut buf = String::new();
+    stream.read_to_string(&mut buf).ok()?;
+    let status_line = buf.lines().next()?;
+    if !status_line.contains(" 200") {
+        return None;
+    }
+    let body = buf.split("\r\n\r\n").nth(1).unwrap_or("");
+    let json: serde_json::Value = serde_json::from_str(body).ok()?;
+    json.get("version")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+}
+
+fn server_kill() {
+    if let Ok(mut guard) = SERVER.lock() {
+        if let Some(state) = guard.take() {
+            if let Some(mut child) = state.child {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+}
+
+/// Start (or adopt) an `openshark serve` API server on 127.0.0.1.
+#[tauri::command]
+async fn server_start(port: Option<u16>) -> Result<ServerStatus, String> {
+    let port = port.unwrap_or(DEFAULT_SERVER_PORT);
+    tokio::task::spawn_blocking(move || {
+        // Already tracked and healthy?
+        if let Ok(guard) = SERVER.lock() {
+            if let Some(state) = &*guard {
+                if let Some(version) = health_check(state.port) {
+                    return Ok(ServerStatus {
+                        running: true,
+                        owned: state.child.is_some(),
+                        port: state.port,
+                        version: Some(version),
+                    });
+                }
+            }
+        }
+
+        // Adopt an externally started server on the target port.
+        if let Some(version) = health_check(port) {
+            if let Ok(mut guard) = SERVER.lock() {
+                *guard = Some(ServerState { child: None, port });
+            }
+            return Ok(ServerStatus {
+                running: true,
+                owned: false,
+                port,
+                version: Some(version),
+            });
+        }
+
+        // Spawn our own.
+        let bin = openshark_bin()?;
+        let child = Command::new(bin)
+            .args(["serve", "-a", &format!("127.0.0.1:{port}")])
+            .env("NO_COLOR", "1")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("failed to spawn openshark serve: {e}"))?;
+
+        if let Ok(mut guard) = SERVER.lock() {
+            *guard = Some(ServerState {
+                child: Some(child),
+                port,
+            });
+        }
+
+        let start = Instant::now();
+        loop {
+            if let Some(version) = health_check(port) {
+                return Ok(ServerStatus {
+                    running: true,
+                    owned: true,
+                    port,
+                    version: Some(version),
+                });
+            }
+            if start.elapsed() > Duration::from_secs(15) {
+                server_kill();
+                return Err("openshark serve did not become healthy within 15s".to_string());
+            }
+            std::thread::sleep(Duration::from_millis(300));
+        }
+    })
+    .await
+    .map_err(|e| format!("task join failed: {e}"))?
+}
+
+/// Stop the server if we own it.
+#[tauri::command]
+fn server_stop() -> ServerStatus {
+    server_kill();
+    ServerStatus {
+        running: false,
+        owned: false,
+        port: DEFAULT_SERVER_PORT,
+        version: None,
+    }
+}
+
+/// Report server status without changing anything.
+#[tauri::command]
+fn server_status(port: Option<u16>) -> ServerStatus {
+    let tracked = SERVER
+        .lock()
+        .ok()
+        .and_then(|g| g.as_ref().map(|s| (s.port, s.child.is_some())));
+    let (port, owned) = match (tracked, port) {
+        (Some((p, o)), _) => (p, o),
+        (None, Some(p)) => (p, false),
+        (None, None) => (DEFAULT_SERVER_PORT, false),
+    };
+    match health_check(port) {
+        Some(version) => ServerStatus {
+            running: true,
+            owned,
+            port,
+            version: Some(version),
+        },
+        None => ServerStatus {
+            running: false,
+            owned,
+            port,
+            version: None,
+        },
+    }
+}
+
+// ---------------------------------------------------------------------------
 // App setup
 // ---------------------------------------------------------------------------
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             binary_info,
             run_openshark,
             stream_openshark,
             read_config,
             write_config,
+            server_start,
+            server_stop,
+            server_status,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running openshark-desktop");
+        .build(tauri::generate_context!())
+        .expect("error while building openshark-desktop");
+
+    app.run(|_handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            server_kill();
+        }
+    });
 }
