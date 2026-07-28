@@ -57,13 +57,11 @@
 <div class="shell">
   <aside class="sidebar">
     <div class="logo">
-      <pre class="shark">
-  ___
- / _ \ _ __  ___ _ __
-| | | | '_ \/ _ \ '_ \
-| |_| | |_) |  __/ | | |
- \___/| .__/ \___|_| |_|
-      |_|  SHARK</pre>
+      <pre class="shark">   ___                 ___ _             _
+  / _ \ _ __  ___ _ _ / __| |_  __ _ _ _| |__
+ | (_) | '_ \/ -_) ' \\__ \ ' \/ _` | '_| / /
+  \___/| .__/\___|_||_|___/_||_\__,_|_| |_\_\
+       |_|</pre>
       <span class="tagline glow-text">Fast. Precise. Hungry.</span>
     </div>
 
@@ -162,13 +160,17 @@
   }
 
   .shark {
-    font-size: 8px;
+    font-size: 7.5px;
     line-height: 1.2;
     color: var(--neon-cyan);
     text-shadow: 0 0 6px rgba(0, 229, 255, 0.6);
+    width: fit-content;
+    margin: 0 auto;
   }
 
   .tagline {
+    display: block;
+    text-align: center;
     font-size: 10px;
     color: var(--neon-pink);
     font-style: italic;
