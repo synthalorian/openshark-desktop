@@ -57,12 +57,11 @@
 <div class="shell">
   <aside class="sidebar">
     <div class="logo">
-      <pre class="shark">   ___                 ___ _             _
-  / _ \ _ __  ___ _ _ / __| |_  __ _ _ _| |__
- | (_) | '_ \/ -_) ' \\__ \ ' \/ _` | '_| / /
-  \___/| .__/\___|_||_|___/_||_\__,_|_| |_\_\
-       |_|</pre>
-      <span class="tagline glow-text">Fast. Precise. Hungry.</span>
+      <div class="wordmark">
+        <span class="word-open">OPEN</span>
+        <span class="word-shark">SHARK</span>
+      </div>
+      <span class="tagline">Fast. Precise. Hungry.</span>
     </div>
 
     <nav>
@@ -159,13 +158,24 @@
     margin-bottom: 12px;
   }
 
-  .shark {
-    font-size: 7.5px;
-    line-height: 1.2;
+  .wordmark {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    font-size: 24px;
+    line-height: 1.1;
+    letter-spacing: 2px;
+    margin-bottom: 4px;
+  }
+
+  .word-open {
     color: var(--neon-cyan);
-    text-shadow: 0 0 6px rgba(0, 229, 255, 0.6);
-    width: fit-content;
-    margin: 0 auto;
+    text-shadow: 0 0 8px rgba(0, 229, 255, 0.5);
+  }
+
+  .word-shark {
+    color: var(--neon-pink);
+    text-shadow: 0 0 8px rgba(255, 45, 120, 0.5);
   }
 
   .tagline {
@@ -174,6 +184,7 @@
     font-size: 10px;
     color: var(--neon-pink);
     font-style: italic;
+    opacity: 0.85;
   }
 
   nav {
