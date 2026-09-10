@@ -1,5 +1,6 @@
 {
   "name": "openshark-desktop",
+  "license": "Apache-2.0",
   "private": true,
   "version": "0.3.0",
   "description": "Standalone desktop GUI for OpenShark — the harness that learns",
