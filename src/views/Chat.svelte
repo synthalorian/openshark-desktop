@@ -134,7 +134,7 @@
         class="model-input"
         bind:value={model}
         placeholder="model (blank = server default)"
-        title="Model override, e.g. synthclaw-fast"
+        title="Model override, e.g. blackclaw-fast"
       />
     </div>
   </header>
